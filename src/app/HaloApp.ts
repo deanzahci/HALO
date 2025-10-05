@@ -47,16 +47,8 @@ export class HaloApp {
       // Load saved preferences
       const savedCameraId = localStorage.getItem('halo.cameraId')
       const savedAspect = (localStorage.getItem('halo.aspect') as VideoAspect) || '9:16'
-      
-      // Initialize camera with saved device
-      await this.camera.initialize(savedCameraId)
-      this.currentAspect = savedAspect
-      this.camera.setAspect(this.currentAspect)
-      
-      // Initialize MediaPipe
-      await initMediaPipe(this.camera.getVideoElement())
-      
-      // Create stage container
+
+      // Create stage container before camera initialization so sizing works
       const stage = document.createElement('div')
       stage.className = 'halo-stage'
       stage.id = 'haloStage'
@@ -72,6 +64,14 @@ export class HaloApp {
       diagCanvas.id = 'diagCanvas'
       stage.appendChild(diagCanvas)
       initDiagnostics(diagCanvas, this.camera.getVideoElement())
+
+      // Initialize camera with saved device now that stage is ready
+      await this.camera.initialize(savedCameraId)
+      this.currentAspect = savedAspect
+      this.camera.setAspect(this.currentAspect)
+      
+      // Initialize MediaPipe
+      await initMediaPipe(this.camera.getVideoElement())
       
       // Set up event listeners
       this.setupEventListeners()
@@ -232,7 +232,7 @@ export class HaloApp {
     
     // Render countdown
     if (this.countdownActive) {
-      this.renderCountdown(width, height)
+      this.renderCountdown(ctx, width, height)
     }
   }
 
@@ -287,10 +287,7 @@ export class HaloApp {
     }
   }
   
-  private renderCountdown(width: number, height: number): void {
-    const ctx = this.auraRenderer.getContext()
-    if (!ctx) return
-    
+  private renderCountdown(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     const centerX = width / 2
     const centerY = height / 2
     
@@ -363,7 +360,7 @@ export class HaloApp {
 
   private reset(): void {
     this.classifier.reset()
-    this.auraRenderer.clear()
+    this.effectsManager.clear()
     this.currentGesture = 'NONE'
     this.manualMode = false
     this.updateUI()
