@@ -1,0 +1,417 @@
+import { Camera } from '../modules/Camera'
+import { initMediaPipe, processFrame, destroyMediaPipe, MPResults } from '../modules/mediapipe'
+import { GestureClassifier } from '../modules/GestureClassifier'
+import { EffectsManager } from '../modules/EffectsManager'
+import { CaptureSystem } from '../modules/CaptureSystem'
+import { UI } from '../ui/UI'
+import { initDiagnostics, drawDiagnostics, setDiagnosticsEnabled } from '../modules/diagnostics'
+import { GestureType } from '../constants'
+import { GestureState } from '../types'
+import { listVideoInputs, unlockDeviceLabels } from '../utils/camera'
+import { VideoAspect } from '../renderer/config'
+import { computeCenteredCrop } from '../renderer/crop'
+
+export class HaloApp {
+  private camera: Camera
+  private classifier: GestureClassifier
+  private effectsManager: EffectsManager
+  private captureSystem: CaptureSystem
+  private ui: UI
+  private container: HTMLElement
+  private isRunning = false
+  private animationId: number | null = null
+  private currentGesture: GestureType = 'NONE'
+  private manualMode = false
+  private diagnosticsEnabled = true
+  private currentMPResults: MPResults | null = null
+  private lastGestureState: GestureState | null = null
+  private countdownActive = false
+  private countdownValue = 0
+  private countdownStartTime = 0
+  private countdownDuration = 3000 // 3 seconds
+  private currentAspect: VideoAspect = '9:16'
+
+  constructor() {
+    this.container = document.getElementById('app')!
+    this.camera = new Camera()
+    this.classifier = new GestureClassifier()
+    this.captureSystem = new CaptureSystem()
+    this.ui = new UI(this.container)
+    
+    // Initialize effects manager after camera is ready
+    this.effectsManager = new EffectsManager(this.camera.getContext())
+  }
+
+  async init(): Promise<void> {
+    try {
+      // Load saved preferences
+      const savedCameraId = localStorage.getItem('halo.cameraId')
+      const savedAspect = (localStorage.getItem('halo.aspect') as VideoAspect) || '9:16'
+      
+      // Initialize camera with saved device
+      await this.camera.initialize(savedCameraId)
+      this.currentAspect = savedAspect
+      this.camera.setAspect(this.currentAspect)
+      
+      // Initialize MediaPipe
+      await initMediaPipe(this.camera.getVideoElement())
+      
+      // Create stage container
+      const stage = document.createElement('div')
+      stage.className = 'halo-stage'
+      stage.id = 'haloStage'
+      this.container.appendChild(stage)
+      
+      // Add camera elements to stage
+      stage.appendChild(this.camera.getVideoElement())
+      stage.appendChild(this.camera.getCanvas())
+      
+      // Initialize diagnostics within stage
+      const diagCanvas = document.createElement('canvas')
+      diagCanvas.className = 'diag'
+      diagCanvas.id = 'diagCanvas'
+      stage.appendChild(diagCanvas)
+      initDiagnostics(diagCanvas, this.camera.getVideoElement())
+      
+      // Set up event listeners
+      this.setupEventListeners()
+      
+      // Populate camera selector
+      await this.populateCameraSelector()
+      
+      // Set initial aspect in UI
+      this.ui.setAspect(this.currentAspect)
+      
+      // Start the main loop
+      this.start()
+      
+    } catch (error) {
+      console.error('Failed to initialize Halo app:', error)
+      this.showError('Camera access denied or not available. Please refresh and allow camera access.')
+      this.enableManualMode()
+    }
+  }
+
+  private setupEventListeners(): void {
+    // Capture button
+    this.ui.onCaptureClick(() => this.capture())
+    
+    // Reset button
+    this.ui.onResetClick(() => this.reset())
+    
+    // Share button
+    this.ui.onShareClick(() => {
+      const currentCapture = this.captureSystem.getCurrentCapture()
+      if (currentCapture) {
+        this.ui.showShareModal(currentCapture)
+      }
+    })
+    
+    // Manual gesture selection
+    this.ui.onManualGestureSelect((gesture: GestureType) => {
+      this.manualMode = true
+      this.currentGesture = gesture
+      this.updateUI()
+    })
+    
+    // Diagnostics toggle
+    this.ui.onDiagnosticsToggle((enabled: boolean) => {
+      this.diagnosticsEnabled = enabled
+      setDiagnosticsEnabled(enabled)
+    })
+    
+    // Camera selection
+    this.ui.onCameraChange(async (deviceId: string) => {
+      try {
+        console.log('Switching to camera:', deviceId)
+        await this.camera.switchCamera(deviceId)
+        localStorage.setItem('halo.cameraId', deviceId)
+        console.log('Camera switched successfully')
+      } catch (error) {
+        console.error('Failed to switch camera:', error)
+        this.showError('Failed to switch camera. Please try again.')
+      }
+    })
+    
+    // Aspect ratio toggle
+    this.ui.onAspectChange((aspect: VideoAspect) => {
+      console.log('Changing aspect to:', aspect)
+      this.currentAspect = aspect
+      this.camera.setAspect(aspect)
+      localStorage.setItem('halo.aspect', aspect)
+      console.log('Aspect changed successfully')
+    })
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'c' || e.key === 'C') {
+        this.capture()
+      } else if (e.key === 'Escape') {
+        this.ui.hideShareModal()
+      } else if (e.key === 'd' || e.key === 'D') {
+        this.diagnosticsEnabled = !this.diagnosticsEnabled
+        setDiagnosticsEnabled(this.diagnosticsEnabled)
+        this.ui.updateDiagnosticsToggle(this.diagnosticsEnabled)
+      }
+    })
+  }
+
+  private start(): void {
+    this.isRunning = true
+    this.loop()
+  }
+
+  private loop(): void {
+    if (!this.isRunning) return
+    
+    this.update()
+    this.render()
+    
+    this.animationId = requestAnimationFrame(() => this.loop())
+  }
+
+  private async update(): Promise<void> {
+    if (!this.camera.isRunning()) return
+    
+    // Draw camera frame
+    this.camera.drawFrame()
+    
+    if (!this.manualMode) {
+      // Process MediaPipe frame
+      const mpResults = processFrame()
+      
+      if (mpResults) {
+        this.currentMPResults = mpResults
+        
+        // Classify gesture
+        const state = this.classifier.updateState(mpResults)
+        this.currentGesture = state.type as GestureType
+        
+        // Handle gesture state changes for countdown
+        this.handleGestureStateChange(state)
+        
+        // Update UI
+        this.updateUI(state)
+        
+        // Draw diagnostics
+        if (this.diagnosticsEnabled) {
+          drawDiagnostics(mpResults)
+        }
+      }
+    } else {
+      // Manual mode - simulate locked state for effects
+      this.currentMPResults = null
+    }
+    
+    // Update countdown
+    this.updateCountdown()
+  }
+
+  private render(): void {
+    if (!this.camera.isRunning()) return
+    
+    const { width, height } = this.camera.getDimensions()
+    const video = this.camera.getVideoElement()
+    const ctx = this.camera.getContext()
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height)
+    
+    // Draw video with aspect-aware cropping
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      const crop = computeCenteredCrop(video.videoWidth, video.videoHeight, width, height)
+      ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height)
+    }
+    
+    // Render effects - always show when gesture is locked (or manual mode)
+    const shouldShowEffects = this.manualMode || (this.lastGestureState?.locked && this.currentGesture !== 'NONE')
+    
+    if (shouldShowEffects && this.currentMPResults) {
+      this.effectsManager.updateAndRender(this.currentGesture, this.currentMPResults, width, height, video)
+    }
+    
+    // Render countdown
+    if (this.countdownActive) {
+      this.renderCountdown(width, height)
+    }
+  }
+
+  private handleGestureStateChange(state: GestureState): void {
+    const wasLocked = this.lastGestureState?.locked || false
+    const isNowLocked = state.locked
+    
+    // Gesture just became locked - start countdown
+    if (!wasLocked && isNowLocked && state.type !== 'NONE') {
+      this.startCountdown()
+    }
+    
+    // Gesture lost lock - cancel countdown
+    if (wasLocked && !isNowLocked) {
+      this.cancelCountdown()
+    }
+    
+    this.lastGestureState = state
+  }
+  
+  private startCountdown(): void {
+    this.countdownActive = true
+    this.countdownValue = 3
+    this.countdownStartTime = performance.now()
+    console.log('Countdown started for gesture:', this.currentGesture)
+  }
+  
+  private cancelCountdown(): void {
+    this.countdownActive = false
+    this.countdownValue = 0
+    console.log('Countdown cancelled')
+  }
+  
+  private updateCountdown(): void {
+    if (!this.countdownActive) return
+    
+    const elapsed = performance.now() - this.countdownStartTime
+    const remaining = Math.max(0, this.countdownDuration - elapsed)
+    
+    // Update countdown value (3, 2, 1, 0)
+    const newValue = Math.ceil(remaining / 1000)
+    if (newValue !== this.countdownValue) {
+      this.countdownValue = newValue
+      console.log('Countdown:', this.countdownValue)
+    }
+    
+    // Auto-capture when countdown reaches 0
+    if (remaining <= 0) {
+      this.cancelCountdown()
+      console.log('Auto-capturing...')
+      this.capture()
+    }
+  }
+  
+  private renderCountdown(width: number, height: number): void {
+    const ctx = this.auraRenderer.getContext()
+    if (!ctx) return
+    
+    const centerX = width / 2
+    const centerY = height / 2
+    
+    ctx.save()
+    ctx.font = 'bold 120px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    
+    // Neon glow effect
+    ctx.shadowColor = '#ffffff'
+    ctx.shadowBlur = 20
+    ctx.fillStyle = `rgba(255, 255, 255, 0.8)`
+    
+    ctx.fillText(this.countdownValue.toString(), centerX, centerY)
+    ctx.restore()
+  }
+  
+  private updateUI(state?: GestureState): void {
+    if (this.manualMode) {
+      // Manual mode - show current gesture
+      const mockState: GestureState = {
+        type: this.currentGesture,
+        confidence: 1.0,
+        locked: true,
+        stabilityCount: 0
+      }
+      this.ui.updateGestureStatus(mockState)
+    } else if (state) {
+      this.ui.updateGestureStatus(state)
+    }
+  }
+
+  private async populateCameraSelector(): Promise<void> {
+    try {
+      // Unlock device labels first
+      await unlockDeviceLabels()
+      
+      // Get list of video devices
+      const devices = await listVideoInputs()
+      
+      // Populate UI selector
+      this.ui.populateCameraSelector(devices, this.camera.getCurrentDeviceId())
+      
+      console.log('Camera selector populated:', devices.length, 'devices found')
+    } catch (error) {
+      console.error('Failed to populate camera selector:', error)
+    }
+  }
+
+  private capture(): void {
+    if (!this.camera.isRunning()) return
+    
+    const canvas = this.camera.getCanvas()
+    const watermarkEnabled = this.ui.getWatermarkEnabled()
+    
+    // Capture the current frame with aura
+    const capture = this.captureSystem.captureFrame(canvas, this.currentGesture, watermarkEnabled, this.currentAspect)
+    
+    // Add to Halo Wall
+    this.ui.addThumbnailToWall(capture)
+    
+    // Show share button
+    this.ui.showShareButton()
+    
+    // Show share modal
+    this.ui.showShareModal(capture)
+    
+    console.log('Captured:', capture.gesture)
+  }
+
+  private reset(): void {
+    this.classifier.reset()
+    this.auraRenderer.clear()
+    this.currentGesture = 'NONE'
+    this.manualMode = false
+    this.updateUI()
+  }
+
+  private enableManualMode(): void {
+    this.manualMode = true
+    this.currentGesture = 'NONE'
+    this.updateUI()
+    
+    // Show error message
+    const errorDiv = document.createElement('div')
+    errorDiv.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 0, 0, 0.9);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 1000;
+    `
+    errorDiv.innerHTML = `
+      <h3>Camera Not Available</h3>
+      <p>Using manual gesture selection mode</p>
+      <p>Click on a gesture below to select an effect</p>
+    `
+    document.body.appendChild(errorDiv)
+    
+    // Remove error message after 5 seconds
+    setTimeout(() => {
+      errorDiv.remove()
+    }, 5000)
+  }
+
+  private showError(message: string): void {
+    console.error(message)
+    // Error handling is done in enableManualMode for this MVP
+  }
+
+  destroy(): void {
+    this.isRunning = false
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId)
+    }
+    this.camera.stop()
+    destroyMediaPipe()
+  }
+}
