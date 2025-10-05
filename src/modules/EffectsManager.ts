@@ -1,4 +1,4 @@
-import { GestureType, BALLOON_SPAWN_COUNT, BALLOON_RISE_SPEED, BALLOON_SWAY_AMPLITUDE, BALLOON_LIFETIME, MAX_ACTIVE_BALLOONS, BALLOON_ELLIPSE_WIDTH, BALLOON_ELLIPSE_HEIGHT, BALLOON_STRING_LENGTH, BALLOON_SHINE_ALPHA, BALLOON_MAX_BLUR } from '../constants'
+import { GestureType, BALLOON_SPAWN_COUNT, BALLOON_RISE_SPEED, BALLOON_SWAY_AMPLITUDE, BALLOON_LIFETIME, MAX_ACTIVE_BALLOONS, BALLOON_ELLIPSE_WIDTH, BALLOON_ELLIPSE_HEIGHT, BALLOON_STRING_LENGTH, BALLOON_SHINE_ALPHA } from '../constants'
 import { MPResults } from './mediapipe'
 import { CoordinateMapping, normToCropPx, computeCenteredCrop } from '../renderer/crop'
 
@@ -92,7 +92,7 @@ class ConfettiParticle extends Particle {
     return this.life > 0
   }
 
-  render(ctx: CanvasRenderingContext2D, time: number): void {
+  render(ctx: CanvasRenderingContext2D, _time: number): void {
     if (!this.active) return
 
     const alpha = Math.min(1, this.life / 0.35) // Fade in last 0.35s
@@ -126,7 +126,7 @@ class ConfettiParticle extends Particle {
 
 // Heart particle
 class HeartParticle extends Particle {
-  update(dt: number, time: number): boolean {
+  update(dt: number, _time: number): boolean {
     if (!this.active) return false
 
     // Update position
@@ -142,7 +142,7 @@ class HeartParticle extends Particle {
     return this.life > 0
   }
 
-  render(ctx: CanvasRenderingContext2D, time: number): void {
+  render(ctx: CanvasRenderingContext2D, _time: number): void {
     if (!this.active) return
 
     const alpha = Math.min(1, this.life / 0.4) // Fade in last 0.4s
@@ -172,7 +172,7 @@ class LightningBolt {
   color = '#7cf7ff'
   glowColor = '#bafcff'
 
-  update(dt: number, time: number): boolean {
+  update(dt: number, _time: number): boolean {
     if (!this.active) return false
     
     this.life -= dt
@@ -243,7 +243,7 @@ class SparkleParticle extends Particle {
     return this.life > 0
   }
 
-  render(ctx: CanvasRenderingContext2D, time: number): void {
+  render(ctx: CanvasRenderingContext2D, _time: number): void {
     if (!this.active) return
 
     const alpha = Math.min(1, this.life / 0.25) // Fade in last 0.25s
@@ -293,13 +293,13 @@ class BalloonParticle extends Particle {
     return this.life > 0
   }
 
-  render(ctx: CanvasRenderingContext2D, time: number): void {
+  render(ctx: CanvasRenderingContext2D, _time: number): void {
     if (!this.active) return
 
     const alpha = Math.min(1, this.life / (BALLOON_LIFETIME / 1000))
     
     ctx.save()
-    ctx.globalAlpha = 1 // Set to full opacity for visibility
+    ctx.globalAlpha = alpha
     ctx.globalCompositeOperation = 'source-over'
     ctx.translate(this.x, this.y)
     
@@ -360,7 +360,6 @@ export class EffectsManager {
   
   // Lock state tracking
   private lastGestureState = 'NONE'
-  private lockEventTriggered = false
   
   // Balloon state management
   private balloonsEnabled = false
@@ -406,7 +405,7 @@ export class EffectsManager {
     const isPeaceSign = gesture === 'PEACE_SIGN'
     
     if (!wasLocked && isLocked) {
-      this.triggerLockEvent(gesture, canvasWidth, canvasHeight, mapping)
+      this.triggerLockEvent(gesture, canvasWidth, canvasHeight)
     }
     
     // Handle balloon state transitions
@@ -452,8 +451,7 @@ export class EffectsManager {
     }
   }
 
-  private triggerLockEvent(gesture: GestureType, canvasWidth: number, canvasHeight: number, mapping: CoordinateMapping | null): void {
-    this.lockEventTriggered = true
+  private triggerLockEvent(gesture: GestureType, canvasWidth: number, canvasHeight: number): void {
     
     if (gesture === 'THUMBS_UP_HALO') {
       // Confetti burst: 120 pieces
@@ -985,7 +983,6 @@ export class EffectsManager {
     this.time = this.lastTime = 0
     this.confettiSpawnTimer = this.heartSpawnTimer = this.boltSpawnTimer = this.sparkleSpawnTimer = this.balloonSpawnTimer = 0
     this.lastGestureState = 'NONE'
-    this.lockEventTriggered = false
     this.balloonsEnabled = false
   }
 }
