@@ -1,5 +1,6 @@
 import { GestureState, CaptureData } from '../types'
 import { GestureType } from '../constants'
+import { getDeviceLabel } from '../utils/camera'
 
 export class UI {
   private container: HTMLElement
@@ -77,6 +78,9 @@ export class UI {
           <h3>Halo Wall</h3>
           <div class="wall-grid" id="wall-grid"></div>
         </div>
+
+        <!-- Perf HUD -->
+        <div class="perf-hud" id="perf-hud">—</div>
       </div>
 
       <style>
@@ -361,6 +365,19 @@ export class UI {
           box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
           z-index: 5;
         }
+
+        .perf-hud {
+          position: absolute;
+          left: 16px;
+          bottom: 16px;
+          background: rgba(0, 0, 0, 0.7);
+          color: #fff;
+          padding: 6px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          line-height: 1;
+          pointer-events: none;
+        }
       </style>
     `
 
@@ -393,12 +410,20 @@ export class UI {
     })
   }
 
+  updatePerfHud(width: number, height: number, fps: number): void {
+    const hud = this.container.querySelector('#perf-hud') as HTMLElement
+    const res = (width && height) ? `${width}×${height}` : '—'
+    const fpsText = Number.isFinite(fps) && fps > 0 ? `${Math.round(fps)} fps` : '— fps'
+    hud.textContent = `${res} • ${fpsText}`
+  }
+
   private getGestureDisplayName(gesture: string): string {
     const names: { [key: string]: string } = {
       'THUMBS_UP_HALO': 'Thumbs Up',
       'TWO_HAND_HEART': 'Heart Hands',
       'ROCK_SIGN': 'Rock Sign',
-      'POINT_SPARKLES': 'Finger Point'
+      'POINT_SPARKLES': 'Finger Point',
+      'PEACE_SIGN': 'Peace Sign'
     }
     return names[gesture] || gesture
   }
@@ -548,35 +573,10 @@ export class UI {
     devices.forEach(device => {
       const option = document.createElement('option')
       option.value = device.deviceId
-      option.textContent = this.getDeviceLabel(device)
+      option.textContent = getDeviceLabel(device)
       option.selected = device.deviceId === currentDeviceId
       select.appendChild(option)
     })
-  }
-
-  getDeviceLabel(device: MediaDeviceInfo): string {
-    if (device.label) {
-      return device.label
-    }
-    
-    // Generate fallback labels for common device types
-    const fallbacks: { [key: string]: string } = {
-      'camera': 'Camera',
-      'webcam': 'Webcam',
-      'facetime': 'FaceTime Camera',
-      'continuity': 'Continuity Camera',
-      'camo': 'Camo',
-      'epoccam': 'EpocCam'
-    }
-    
-    const lowerLabel = device.label?.toLowerCase() || ''
-    for (const [key, label] of Object.entries(fallbacks)) {
-      if (lowerLabel.includes(key)) {
-        return label
-      }
-    }
-    
-    return `Camera ${device.deviceId.slice(-4)}`
   }
 
   onCameraChange(callback: (deviceId: string) => void): void {

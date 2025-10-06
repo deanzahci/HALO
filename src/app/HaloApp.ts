@@ -30,6 +30,9 @@ export class HaloApp {
   private countdownStartTime = 0
   private countdownDuration = 3000 // 3 seconds
   private currentAspect: VideoAspect = '9:16'
+  private fps = 0
+  private lastFpsTime = 0
+  private frameCount = 0
 
   constructor() {
     this.container = document.getElementById('app')!
@@ -166,6 +169,7 @@ export class HaloApp {
     
     this.update()
     this.render()
+    this.updateFps()
     
     this.animationId = requestAnimationFrame(() => this.loop())
   }
@@ -173,8 +177,7 @@ export class HaloApp {
   private async update(): Promise<void> {
     if (!this.camera.isRunning()) return
     
-    // Draw camera frame
-    this.camera.drawFrame()
+    // Camera frame is drawn in render() with aspect-aware crop
     
     if (!this.manualMode) {
       // Process MediaPipe frame
@@ -211,6 +214,7 @@ export class HaloApp {
     if (!this.camera.isRunning()) return
     
     const { width, height } = this.camera.getDimensions()
+    const srcRes = this.camera.getVideoResolution()
     const video = this.camera.getVideoElement()
     const ctx = this.camera.getContext()
     
@@ -226,13 +230,34 @@ export class HaloApp {
     // Render effects - always show when gesture is locked (or manual mode)
     const shouldShowEffects = this.manualMode || (this.lastGestureState?.locked && this.currentGesture !== 'NONE')
     
-    if (shouldShowEffects && this.currentMPResults) {
-      this.effectsManager.updateAndRender(this.currentGesture, this.currentMPResults, width, height, video)
+    if (shouldShowEffects) {
+      const stubResults = this.currentMPResults || { pose: {}, hands: {}, raw: { pose: null, hands: null } }
+      this.effectsManager.updateAndRender(this.currentGesture, stubResults, width, height, video)
     }
     
     // Render countdown
     if (this.countdownActive) {
       this.renderCountdown(ctx, width, height)
+    }
+
+    // Update perf HUD (camera source resolution and app FPS)
+    this.ui.updatePerfHud(srcRes.width, srcRes.height, this.fps)
+  }
+
+  private updateFps(): void {
+    const now = performance.now()
+    if (this.lastFpsTime === 0) {
+      this.lastFpsTime = now
+      this.frameCount = 0
+      this.fps = 0
+      return
+    }
+    this.frameCount++
+    const elapsed = now - this.lastFpsTime
+    if (elapsed >= 500) { // update twice per second
+      this.fps = (this.frameCount * 1000) / elapsed
+      this.frameCount = 0
+      this.lastFpsTime = now
     }
   }
 
@@ -257,13 +282,13 @@ export class HaloApp {
     this.countdownActive = true
     this.countdownValue = 3
     this.countdownStartTime = performance.now()
-    console.log('Countdown started for gesture:', this.currentGesture)
+    // countdown started
   }
   
   private cancelCountdown(): void {
     this.countdownActive = false
     this.countdownValue = 0
-    console.log('Countdown cancelled')
+    // countdown cancelled
   }
   
   private updateCountdown(): void {
@@ -276,13 +301,13 @@ export class HaloApp {
     const newValue = Math.ceil(remaining / 1000)
     if (newValue !== this.countdownValue) {
       this.countdownValue = newValue
-      console.log('Countdown:', this.countdownValue)
+      // tick
     }
     
     // Auto-capture when countdown reaches 0
     if (remaining <= 0) {
       this.cancelCountdown()
-      console.log('Auto-capturing...')
+      // auto-capturing
       this.capture()
     }
   }
@@ -337,14 +362,14 @@ export class HaloApp {
     }
   }
 
-  private capture(): void {
+  private async capture(): Promise<void> {
     if (!this.camera.isRunning()) return
     
     const canvas = this.camera.getCanvas()
     const watermarkEnabled = this.ui.getWatermarkEnabled()
     
     // Capture the current frame with aura
-    const capture = this.captureSystem.captureFrame(canvas, this.currentGesture, watermarkEnabled, this.currentAspect)
+    const capture = await this.captureSystem.captureFrame(canvas, this.currentGesture, watermarkEnabled, this.currentAspect)
     
     // Add to Halo Wall
     this.ui.addThumbnailToWall(capture)

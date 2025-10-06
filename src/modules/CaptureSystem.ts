@@ -2,16 +2,28 @@ import { CaptureData } from '../types'
 import { WATERMARK_TEXT, CAPTURE_QUALITY } from '../constants'
 import { VideoAspect, getResolutionForAspect } from '../renderer/config'
 
+let watermarkImg: HTMLImageElement | null = null
+
+async function loadWatermark(): Promise<HTMLImageElement> {
+  if (watermarkImg) return watermarkImg
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => { watermarkImg = img; resolve(img) }
+    img.onerror = reject
+    img.src = '/watermark.png'
+  })
+}
+
 export class CaptureSystem {
   private captures: CaptureData[] = []
   private currentCapture: CaptureData | null = null
 
-  captureFrame(
+  async captureFrame(
     canvas: HTMLCanvasElement, 
     gesture: string, 
     watermarkEnabled: boolean = true,
     aspect: VideoAspect = '9:16'
-  ): CaptureData {
+  ): Promise<CaptureData> {
     // Create a new canvas for the final image using the current aspect
     const finalCanvas = document.createElement('canvas')
     const finalCtx = finalCanvas.getContext('2d')!
@@ -26,11 +38,11 @@ export class CaptureSystem {
     
     // Add watermark if enabled
     if (watermarkEnabled) {
-      this.addWatermark(finalCtx, finalCanvas.width, finalCanvas.height)
+      await this.addWatermark(finalCtx, finalCanvas.width, finalCanvas.height)
     }
     
     // Convert to data URL
-    const imageData = finalCanvas.toDataURL('image/png', CAPTURE_QUALITY)
+    const imageData = finalCanvas.toDataURL('image/png')
     
     const capture: CaptureData = {
       id: this.generateId(),
@@ -45,21 +57,38 @@ export class CaptureSystem {
     return capture
   }
 
-  private addWatermark(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    const fontSize = Math.max(12, width * 0.015)
+  private async addWatermark(ctx: CanvasRenderingContext2D, width: number, height: number): Promise<void> {
     const padding = 20
-    
-    ctx.save()
-    ctx.font = `${fontSize}px Arial`
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'bottom'
-    
-    const x = width - padding
-    const y = height - padding
-    
-    ctx.fillText(WATERMARK_TEXT, x, y)
-    ctx.restore()
+    try {
+      const img = await loadWatermark()
+      const targetH = Math.max(24, Math.floor(height * 0.06))
+      const aspect = img.naturalWidth / img.naturalHeight
+      const targetW = Math.floor(targetH * aspect)
+      ctx.drawImage(img, width - padding - targetW, height - padding - targetH, targetW, targetH)
+    } catch (_err) {
+      const fontSize = Math.max(68, width * 0.015)
+      ctx.save()
+      ctx.font = `${fontSize}px Orbitron, Arial, sans-serif`
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(WATERMARK_TEXT, width - padding, height - padding)
+      ctx.restore()
+    }
+
+    // Add futuristic text alongside the image watermark
+    try {
+      const label = 'HCI × halo'
+      const textSize = Math.max(68, width * 0.016)
+      ctx.save()
+      ctx.font = `${textSize}px Orbitron, Arial, sans-serif`
+      ctx.fillStyle = 'rgb(255, 255, 255)'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      // Place at bottom-left with padding
+      ctx.fillText(label, padding, height - padding)
+      ctx.restore()
+    } catch {}
   }
 
   private generateId(): string {

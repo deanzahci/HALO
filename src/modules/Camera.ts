@@ -109,6 +109,7 @@ export class Camera {
     }
     
     // Scale context for device pixel ratio
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0)
     this.ctx.scale(DPR, DPR)
     
     console.log('Canvas size updated:', { aspect: this.currentAspect, w, h, DPR })
@@ -132,25 +133,19 @@ export class Camera {
     this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height)
   }
 
-  captureFrame(): ImageData | null {
-    if (!this.isActive || this.video.videoWidth === 0) return null
-    
-    this.drawFrame()
-    return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height)
-  }
+  
 
-  getCurrentFrame(): DetectionFrame {
-    return {
-      timestamp: performance.now(),
-      // Frame data will be populated by MediaPipe
-    }
-  }
+  
 
   getDimensions(): { width: number; height: number } {
     return {
       width: this.canvas.width / Math.max(1, window.devicePixelRatio || 1),
       height: this.canvas.height / Math.max(1, window.devicePixelRatio || 1)
     }
+  }
+
+  getVideoResolution(): { width: number; height: number } {
+    return { width: this.video.videoWidth, height: this.video.videoHeight }
   }
 
   getCurrentDeviceId(): string | null {

@@ -10,7 +10,7 @@ export class GestureClassifier {
     stabilityCount: 0
   }
 
-  // private lastLockedGesture: string = 'NONE'
+  
   private graceFramesRemaining = 0
 
   classifyFrame(mpResults: MPResults): { type: GestureType; confidence: number } {
@@ -63,7 +63,7 @@ export class GestureClassifier {
             // Check if we should lock this gesture
             if (this.currentState.stabilityCount >= STABILITY_FRAMES) {
               this.currentState.locked = true
-              // this.lastLockedGesture = type
+              
               this.graceFramesRemaining = LOST_GRACE_FRAMES
             }
     } else {
@@ -383,7 +383,7 @@ export class GestureClassifier {
       locked: false,
       stabilityCount: 0
     }
-    // this.lastLockedGesture = 'NONE'
+    
     this.graceFramesRemaining = 0
   }
 }

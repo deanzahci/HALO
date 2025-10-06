@@ -5,7 +5,7 @@ import { CoordinateMapping, normToCropPx, computeCenteredCrop } from '../rendere
 // Performance constants
 const MAX_CONFETTI = 160
 const MAX_HEARTS = 70
-const MAX_BOLTS = 6
+import { MAX_ACTIVE_BOLTS as MAX_BOLTS } from '../constants'
 const MAX_SPARKLES = 160
 const MAX_BALLOONS = MAX_ACTIVE_BALLOONS
 
@@ -855,13 +855,11 @@ export class EffectsManager {
   // Balloon system
   private updateBalloonSpawn(mpResults: MPResults, canvasWidth: number, canvasHeight: number, mapping: CoordinateMapping | null): void {
     if (!this.balloonsEnabled) {
-      console.log('Balloons not enabled')
       return
     }
     
     const hands = mpResults.hands
     if (!hands) {
-      console.log('No hands detected')
       return
     }
     
@@ -891,23 +889,14 @@ export class EffectsManager {
     this.balloonSpawnTimer += 16 // ~60 FPS
     const spawnInterval = 400 // 0.4s
     
-    console.log('Balloon spawn check:', { 
-      timer: this.balloonSpawnTimer, 
-      interval: spawnInterval, 
-      activeCount: this.activeBalloons.length, 
-      maxBalloons: MAX_BALLOONS,
-      handCenterX,
-      canvasHeight 
-    })
+    // spawn check
     
     if (this.balloonSpawnTimer >= spawnInterval && this.activeBalloons.length < MAX_BALLOONS) {
-      console.log('Spawning balloon!')
       this.spawnBalloon(handCenterX, canvasHeight + 20) // Start from bottom + small offset
       this.balloonSpawnTimer = 0
     }
     
-    // Debug: Add temporary magenta dot at spawn location
-    this.drawDebugDot(handCenterX, canvasHeight + 20)
+    // debug marker removed
   }
 
   private isPeaceSignHand(hand: Record<string, [number, number]>): boolean {
@@ -938,25 +927,9 @@ export class EffectsManager {
     console.log('Spawned balloon:', { x: balloon.x, y: balloon.y, color: balloon.color, active: balloon.active })
   }
 
-  private drawDebugDot(x: number, y: number): void {
-    this.ctx.save()
-    this.ctx.fillStyle = '#ff00ff' // Magenta
-    this.ctx.beginPath()
-    this.ctx.arc(x, y, 3, 0, Math.PI * 2)
-    this.ctx.fill()
-    this.ctx.restore()
-  }
+  private drawDebugDot(_x: number, _y: number): void {}
 
   private renderBalloons(): void {
-    // Debug test: Draw static red circle at bottom center
-    this.ctx.save()
-    this.ctx.fillStyle = 'red'
-    this.ctx.globalAlpha = 1
-    this.ctx.globalCompositeOperation = 'source-over'
-    this.ctx.beginPath()
-    this.ctx.arc(this.ctx.canvas.width / 2, this.ctx.canvas.height - 20, 5, 0, Math.PI * 2)
-    this.ctx.fill()
-    this.ctx.restore()
     
     // Render all active balloons
     this.activeBalloons.forEach(balloon => {

@@ -7,7 +7,4 @@ export function getResolutionForAspect(aspect: VideoAspect): { w: number; h: num
   return aspect === '16:9' ? RES_16_9 : RES_9_16;
 }
 
-export function getAspectRatio(aspect: VideoAspect): number {
-  const { w, h } = getResolutionForAspect(aspect);
-  return w / h;
-}
+// getAspectRatio removed (unused)
