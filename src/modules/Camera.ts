@@ -1,4 +1,3 @@
-import { DetectionFrame } from '../types'
 import { getStreamForDevice, stopStreamTracks } from '../utils/camera'
 import { VideoAspect, getResolutionForAspect } from '../renderer/config'
 import { updateDiagnosticsForStage } from './diagnostics'

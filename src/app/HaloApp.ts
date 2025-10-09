@@ -28,7 +28,13 @@ export class HaloApp {
   private countdownActive = false
   private countdownValue = 0
   private countdownStartTime = 0
-  private countdownDuration = 3000 // 3 seconds
+  private countdownDuration = 3000 // 3 seconds (gesture-locked countdown)
+  // Manual capture countdown (5 seconds) when user presses capture button
+  private manualCountdownActive = false
+  private manualCountdownStart = 0
+  private manualCountdownDuration = 5000 // 5 seconds
+  // Handle returned by the File System Access API when user picks a folder
+  private captureDirHandle: any = null
   private currentAspect: VideoAspect = '9:16'
   private fps = 0
   private lastFpsTime = 0
@@ -96,8 +102,8 @@ export class HaloApp {
   }
 
   private setupEventListeners(): void {
-    // Capture button
-    this.ui.onCaptureClick(() => this.capture())
+    // Capture button - start/cancel a 5s manual countdown
+    this.ui.onCaptureClick(() => this.toggleManualCountdown())
     
     // Reset button
     this.ui.onResetClick(() => this.reset())
@@ -148,7 +154,8 @@ export class HaloApp {
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.key === 'c' || e.key === 'C') {
-        this.capture()
+        // Toggle manual 5s countdown on keyboard as well
+        this.toggleManualCountdown()
       } else if (e.key === 'Escape') {
         this.ui.hideShareModal()
       } else if (e.key === 'd' || e.key === 'D') {
@@ -157,6 +164,54 @@ export class HaloApp {
         this.ui.updateDiagnosticsToggle(this.diagnosticsEnabled)
       }
     })
+  }
+
+  private toggleManualCountdown(): void {
+    if (this.manualCountdownActive) {
+      this.cancelManualCountdown()
+    } else {
+      this.startManualCountdown()
+    }
+  }
+
+  private startManualCountdown(): void {
+    if (!this.camera.isRunning()) return
+    this.manualCountdownActive = true
+    this.manualCountdownStart = performance.now()
+    // Use UI selected timer seconds
+    const seconds = this.ui.getCaptureTimerSeconds()
+    this.manualCountdownDuration = seconds * 1000
+    // Initialize UI with selected seconds
+    this.ui.updateCaptureCountdown(seconds)
+    // Show big overlay countdown so it doesn't get captured
+    this.ui.showBigCountdown(seconds)
+  }
+
+  private cancelManualCountdown(): void {
+    this.manualCountdownActive = false
+    this.ui.updateCaptureCountdown(0)
+    this.ui.hideBigCountdown()
+  }
+
+  private updateManualCountdown(): void {
+    if (!this.manualCountdownActive) return
+
+    const elapsed = performance.now() - this.manualCountdownStart
+    const remaining = Math.max(0, this.manualCountdownDuration - elapsed)
+    const secondsLeft = Math.ceil(remaining / 1000)
+
+    // Update UI when value changes
+    if (secondsLeft !== this.countdownValue) {
+      this.ui.updateCaptureCountdown(secondsLeft)
+      this.ui.updateBigCountdown(secondsLeft)
+      this.countdownValue = secondsLeft
+    }
+
+    if (remaining <= 0) {
+      // Stop and capture
+      this.cancelManualCountdown()
+      this.capture()
+    }
   }
 
   private start(): void {
@@ -208,6 +263,8 @@ export class HaloApp {
     
     // Update countdown
     this.updateCountdown()
+    // Update manual (button) countdown if active
+    this.updateManualCountdown()
   }
 
   private render(): void {
@@ -239,6 +296,7 @@ export class HaloApp {
     if (this.countdownActive) {
       this.renderCountdown(ctx, width, height)
     }
+    // Manual countdown is shown via UI overlay (so it won't be captured)
 
     // Update perf HUD (camera source resolution and app FPS)
     this.ui.updatePerfHud(srcRes.width, srcRes.height, this.fps)
@@ -329,6 +387,8 @@ export class HaloApp {
     ctx.fillText(this.countdownValue.toString(), centerX, centerY)
     ctx.restore()
   }
+
+  // manual countdown is handled via UI overlay methods
   
   private updateUI(state?: GestureState): void {
     if (this.manualMode) {
@@ -364,22 +424,67 @@ export class HaloApp {
 
   private async capture(): Promise<void> {
     if (!this.camera.isRunning()) return
-    
+
     const canvas = this.camera.getCanvas()
     const watermarkEnabled = this.ui.getWatermarkEnabled()
-    
+    // Play capture sound (UI handles browser compatibility)
+    this.ui.playCaptureSound()
+
     // Capture the current frame with aura
     const capture = await this.captureSystem.captureFrame(canvas, this.currentGesture, watermarkEnabled, this.currentAspect)
-    
+
     // Add to Halo Wall
     this.ui.addThumbnailToWall(capture)
-    
-    // Show share button
+
+    // Show share button and modal
     this.ui.showShareButton()
-    
-    // Show share modal
     this.ui.showShareModal(capture)
-    
+
+    // Save locally to `captures/halo_<timestamp>.png` using File System Access API when available.
+    ;(async () => {
+      try {
+        const timestamp = Date.now()
+        const filename = `halo_${timestamp}.png`
+        const dataUrl = capture.imageData
+
+        // File System Access API path
+        if ((window as any).showDirectoryPicker) {
+          // Ask for a directory once
+          if (!this.captureDirHandle) {
+            this.captureDirHandle = await (window as any).showDirectoryPicker()
+          }
+
+          // Ensure a 'captures' subfolder exists
+          let targetDir = this.captureDirHandle
+          try {
+            targetDir = await this.captureDirHandle.getDirectoryHandle('captures', { create: true })
+          } catch (e) {
+            // fall back to root handle
+            targetDir = this.captureDirHandle
+          }
+
+          const fh = await targetDir.getFileHandle(filename, { create: true })
+          const writable = await fh.createWritable()
+          const res = await fetch(dataUrl)
+          const blob = await res.blob()
+          await writable.write(blob)
+          await writable.close()
+          console.log('Saved capture to local folder as', filename)
+        } else {
+          // Fallback: trigger download
+          const a = document.createElement('a')
+          a.href = dataUrl
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          a.remove()
+          console.log('Downloaded capture as', filename)
+        }
+      } catch (err) {
+        console.warn('Failed to save capture locally:', err)
+      }
+    })()
+
     console.log('Captured:', capture.gesture)
   }
 

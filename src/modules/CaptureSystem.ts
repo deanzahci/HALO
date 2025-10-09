@@ -1,5 +1,5 @@
 import { CaptureData } from '../types'
-import { WATERMARK_TEXT, CAPTURE_QUALITY } from '../constants'
+import { WATERMARK_TEXT } from '../constants'
 import { VideoAspect, getResolutionForAspect } from '../renderer/config'
 
 let watermarkImg: HTMLImageElement | null = null

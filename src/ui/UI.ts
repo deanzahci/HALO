@@ -18,6 +18,10 @@ export class UI {
   private createUI(): void {
     this.container.innerHTML = `
       <div class="ui-overlay">
+        <!-- Big centered countdown overlay (hidden by default) -->
+        <div id="big-countdown" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;display:none;z-index:1001;">
+          <div id="big-countdown-text" style="font-weight:bold;font-size:160px;color:white;text-align:center;text-shadow:0 0 30px rgba(255,255,255,0.9);">5</div>
+        </div>
         <!-- Gesture Status -->
         <div class="gesture-status" id="gesture-status">
           <span class="status-text">None</span>
@@ -70,6 +74,13 @@ export class UI {
               <input type="checkbox" id="watermark-toggle" checked>
               Watermark
             </label>
+          </div>
+          <!-- Timer selection -->
+          <div class="timer-select" style="margin-left: 12px; display: flex; gap: 6px; align-items: center;">
+            <label style="color: white; font-size: 12px;">Timer:</label>
+            <button class="timer-btn" data-seconds="3">3s</button>
+            <button class="timer-btn active" data-seconds="5">5s</button>
+            <button class="timer-btn" data-seconds="10">10s</button>
           </div>
         </div>
 
@@ -343,6 +354,7 @@ export class UI {
           margin: 20px 0;
         }
 
+        /* Close button inside card (legacy) */
         .close-modal {
           position: absolute;
           top: 15px;
@@ -352,6 +364,34 @@ export class UI {
           font-size: 24px;
           cursor: pointer;
           color: #666;
+        }
+
+        /* Close button above the card (centered) */
+        .close-modal.above {
+          position: absolute;
+          left: 50%;
+          top: 0;
+          transform: translate(-50%, -100%); /* sit just above the top edge of the wrapper */
+          margin-top: -12px; /* nudge 12px above the card */
+          background: rgba(0,0,0,0.75);
+          color: #fff;
+          border-radius: 18px;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          border: none;
+          cursor: pointer;
+          z-index: 1002;
+          box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+          transition: transform 120ms ease, background 120ms ease;
+        }
+
+        .close-modal.above:hover {
+          transform: translate(-50%, -105% ) scale(1.02);
+          background: rgba(0,0,0,0.85);
         }
 
         .diag {
@@ -385,6 +425,8 @@ export class UI {
     this.gestureMenu = this.container.querySelector('#gesture-menu')!
     this.controls = this.container.querySelector('#controls')!
     this.haloWall = this.container.querySelector('#halo-wall')!
+    // Initialize timer button handlers
+    this.initTimerButtons()
   }
 
   updateGestureStatus(state: GestureState): void {
@@ -449,14 +491,16 @@ export class UI {
     const modal = document.createElement('div')
     modal.className = 'share-modal'
     modal.innerHTML = `
-      <div class="share-modal-content">
-        <button class="close-modal">&times;</button>
-        <h2>Share Your Halo</h2>
-        <img src="${capture.imageData}" class="share-preview" alt="Captured image">
-        <div class="share-actions">
-          <button class="share-btn" id="download-btn">Download PNG</button>
+      <div class="share-modal-content-wrapper" style="position:relative; display:inline-block;">
+        <div class="share-modal-content">
+          <h2>Share Your Halo</h2>
+          <img src="${capture.imageData}" class="share-preview" alt="Captured image">
+          <div class="share-actions">
+            <button class="share-btn" id="download-btn">Download PNG</button>
+          </div>
+          <div class="qr-code" id="qr-container"></div>
         </div>
-        <div class="qr-code" id="qr-container"></div>
+        <button class="close-modal above" aria-label="Close">&times;</button>
       </div>
     `
     
@@ -464,7 +508,10 @@ export class UI {
     this.shareModal = modal
     
     // Add event listeners
-    modal.querySelector('.close-modal')!.addEventListener('click', () => this.hideShareModal())
+  // Prefer the above close button if present
+  const aboveBtn = modal.querySelector('.close-modal.above')
+  const insideBtn = modal.querySelector('.close-modal')
+  ;(aboveBtn || insideBtn)!.addEventListener('click', () => this.hideShareModal())
     modal.querySelector('#download-btn')!.addEventListener('click', () => this.downloadImage(capture))
     
     // Generate QR code
@@ -476,6 +523,27 @@ export class UI {
         this.hideShareModal()
       }
     })
+  }
+
+  // Simple capture shutter sound using WebAudio API
+  playCaptureSound(): void {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const o = ctx.createOscillator()
+      const g = ctx.createGain()
+      o.type = 'triangle'
+      o.frequency.setValueAtTime(1000, ctx.currentTime)
+      g.gain.setValueAtTime(0, ctx.currentTime)
+      g.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.001)
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25)
+      o.connect(g)
+      g.connect(ctx.destination)
+      o.start()
+      o.stop(ctx.currentTime + 0.3)
+    } catch (error) {
+      // ignore if audio not available
+      console.warn('Could not play capture sound', error)
+    }
   }
 
   private async generateQRCode(dataUrl: string, container: HTMLElement): Promise<void> {
@@ -531,6 +599,21 @@ export class UI {
 
   onCaptureClick(callback: () => void): void {
     this.controls.querySelector('#capture-btn')!.addEventListener('click', callback)
+  }
+
+  // Update the capture button to display a countdown (secondsLeft > 0)
+  // or reset text when secondsLeft is 0.
+  updateCaptureCountdown(secondsLeft: number): void {
+    const btn = this.controls.querySelector('#capture-btn') as HTMLButtonElement
+    if (!btn) return
+
+    if (secondsLeft > 0) {
+      btn.textContent = `Capture (${secondsLeft})`
+      btn.classList.add('countdown')
+    } else {
+      btn.textContent = 'Capture (C)'
+      btn.classList.remove('countdown')
+    }
   }
 
   onResetClick(callback: () => void): void {
@@ -599,6 +682,44 @@ export class UI {
         callback(aspect)
       })
     })
+  }
+
+  // Capture timer selection (3/5/10s)
+  getCaptureTimerSeconds(): number {
+    const active = this.controls.querySelector('.timer-btn.active') as HTMLElement | null
+    if (!active) return 5
+    return Number(active.getAttribute('data-seconds')) || 5
+  }
+
+  private initTimerButtons(): void {
+    const buttons = this.controls.querySelectorAll('.timer-btn')
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'))
+        btn.classList.add('active')
+      })
+    })
+  }
+
+  // Big centered countdown overlay controls
+  showBigCountdown(secondsLeft: number): void {
+    const wrapper = document.getElementById('big-countdown')
+    const text = document.getElementById('big-countdown-text')
+    if (!wrapper || !text) return
+    text.textContent = String(secondsLeft)
+    wrapper.style.display = 'block'
+  }
+
+  updateBigCountdown(secondsLeft: number): void {
+    const text = document.getElementById('big-countdown-text')
+    if (!text) return
+    text.textContent = String(secondsLeft)
+  }
+
+  hideBigCountdown(): void {
+    const wrapper = document.getElementById('big-countdown')
+    if (!wrapper) return
+    wrapper.style.display = 'none'
   }
 
   setAspect(aspect: '16:9' | '9:16'): void {
